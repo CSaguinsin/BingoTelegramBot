@@ -16,3 +16,12 @@ print(f"Timezone: {TIMEZONE}")
 print(f"Timezone Common Name: {TIMEZONE_COMMON_NAME}")
 print(f"Bot Username: {BOT_USERNAME}")
 
+
+# Get the additional variables
+MONDAY_API_TOKEN = os.getenv('MONDAY_API_TOKEN')
+MONDAY_BOARD_ID = os.getenv('MONDAY_BOARD_ID')
+
+# Use the additional variables
+print(f"Monday API Token: {MONDAY_API_TOKEN}")
+print(f"Monday Board ID: {MONDAY_BOARD_ID}")
+

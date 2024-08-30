@@ -21,9 +21,14 @@ print(f"IMGOCR API: {api_key}")
 
 # Get the additional variables
 MONDAY_API_TOKEN = os.getenv('MONDAY_API_TOKEN')
-MONDAY_BOARD_ID = os.getenv('MONDAY_BOARD_ID')
+POLICY_BOARD_ID = os.getenv('POLICY_BOARD_ID')
+REFERRER_BOARD_ID = os.getenv('REFERRER_BOARD_ID')
+INSURANCE_BOARD_ID = os.getenv('INSURANCE_BOARD_ID')
 
 # Use the additional variables
 print(f"Monday API Token: {MONDAY_API_TOKEN}")
-print(f"Monday Board ID: {MONDAY_BOARD_ID}")
+print(f"Policy Board ID: {POLICY_BOARD_ID}")
+print(f"Referrer Board ID: {REFERRER_BOARD_ID}")
+print(f"Insurance Board ID: {INSURANCE_BOARD_ID}")
+
 

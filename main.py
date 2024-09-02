@@ -15,10 +15,8 @@ from reportlab.pdfgen import canvas
 from datetime import datetime
 from pathlib import Path
 
-
-
 # Explicitly specify the path to tesseract.exe
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files (x64)\Tesseract-OCR\tesseract.exe'
+pytesseract.pytesseract.tesseract_cmd = '/opt/homebrew/bin/tesseract'
 
 # Load environment variables from .env file
 load_dotenv()
@@ -31,7 +29,7 @@ REFERRER_BOARD_ID = os.getenv('REFERRER_BOARD_ID')
 INSURANCE_BOARD_ID = os.getenv('INSURANCE_BOARD_ID')
 
 # AI model endpoint
-AI_MODEL_ENDPOINT = "http://52.221.236.123:8502/extract-pdf" 
+AI_MODEL_ENDPOINT = "http://52.221.236.123:8502/extract-pdf"
 
 # Path to your PDF folder
 PDF_FOLDER = Path.home() / "Projects" / "BingoTelegramBot" / "pdf_folder"
@@ -44,17 +42,15 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-CHOOSING, UPLOAD_DRIVER_LICENSE, UPLOAD_IDENTITY_CARD, UPLOAD_LOG_CARD, AGENT_NAME, DEALERSHIP, CONTACT_INFO = range(7)
+ASKING_NAME, CHOOSING, UPLOAD_DRIVER_LICENSE, UPLOAD_IDENTITY_CARD, UPLOAD_LOG_CARD, DEALERSHIP, CONTACT_INFO = range(7)
 
 # Monday board columns ID's
-
-# Referrer info board columns ID
-# AGENT_NAME_COLUMN_ID = "text"
+FULL_NAME = "text9"
+CONTACT_NUMBER = "phone"
 DEALERSHIP_COLUMN_ID = "text4"
 CONTACT_INFO_COLUMN_ID = "phone"
 
-
-OWNER_ID = "text13"
+OWNER_ID = "text78"
 OWNER_ID_TYPE = "text"
 CONTACT_NUMBER = "phone"
 ORIGINAL_REGISTRATION_DATA = "date8"
@@ -63,14 +59,13 @@ VEHICLE_MAKE = "text2"
 ENGINE_NUMBER = "engine_number"
 VEHICLE_NO = "text1"
 
-
-def create_monday_item_from_json(agent_name, json_data):
+def create_monday_item_from_json(full_name, json_data):
     url = 'https://api.monday.com/v2'
     headers = {
         'Authorization': f'Bearer {MONDAY_API_TOKEN}',
         'Content-Type': 'application/json'
     }
-    
+
     # Parse the date to the correct format (YYYY-MM-DD)
     original_registration_date = json_data.get("Original_Registration_Date", "")
     if original_registration_date:
@@ -84,8 +79,8 @@ def create_monday_item_from_json(agent_name, json_data):
 
     # Map the JSON fields to Monday.com column IDs
     column_values = {
-        OWNER_ID: json_data.get("Owner_ID", ""),  # Assuming 'text' is the correct column ID for Owner_ID
-        OWNER_ID_TYPE: json_data.get("Owner_ID_Type", ""),  # Updated to use 'text78' for Owner_ID_Type
+        OWNER_ID: json_data.get("Owner_ID", ""),
+        OWNER_ID_TYPE: json_data.get("Owner_ID_Type", ""),
         CONTACT_NUMBER: {"phone": json_data.get("Contact_Number", ""), "countryShortName": "SG"},
         ORIGINAL_REGISTRATION_DATA: formatted_date,
         VEHICLE_MODEL: json_data.get("Vehicle_Model", ""),
@@ -102,7 +97,7 @@ def create_monday_item_from_json(agent_name, json_data):
     mutation {{
         create_item (
             board_id: {POLICY_BOARD_ID},
-            item_name: "{agent_name}",
+            item_name: "{full_name}",
             column_values: "{column_values_str}"
         ) {{
             id
@@ -122,72 +117,13 @@ def create_monday_item_from_json(agent_name, json_data):
     logger.info(f"Successfully created item in Monday.com: {response.json()}")
     return response.json()
 
-    headers = {
-        'Authorization': f'Bearer {MONDAY_API_TOKEN}',
-        'Content-Type': 'application/json'
-    }
-    
-    # Parse the date to the correct format (YYYY-MM-DD)
-    original_registration_date = json_data.get("Original_Registration_Date", "")
-    if original_registration_date:
-        try:
-            original_registration_date_obj = datetime.strptime(original_registration_date, "%d %b %Y")
-            formatted_date = original_registration_date_obj.strftime("%Y-%m-%d")
-        except ValueError:
-            formatted_date = None
-    else:
-        formatted_date = None
-
-    # Map the JSON fields to Monday.com column IDs
-    column_values = {
-        "text": json_data.get("Owner_ID", ""),  # Assuming 'text' is the correct column ID for Owner_ID
-        "text5": json_data.get("Owner_ID_Type", ""),  # Assuming 'text5' is the correct column ID for Owner_ID_Type
-        CONTACT_NUMBER: {"phone": json_data.get("Contact_Number", ""), "countryShortName": "SG"},
-        ORIGINAL_REGISTRATION_DATA: formatted_date,
-        VEHICLE_MODEL: json_data.get("Vehicle_Model", ""),
-        VEHICLE_MAKE: json_data.get("Vehicle_Make", ""),
-        ENGINE_NUMBER: json_data.get("Engine_No", ""),
-        VEHICLE_NO: json_data.get("Vehicle_No", ""),
-    }
-
-    # Convert the column_values to a string that Monday.com API can accept
-    column_values_str = json.dumps(column_values).replace('"', '\\"')
-
-    # Build the GraphQL mutation query
-    query = f'''
-    mutation {{
-        create_item (
-            board_id: {POLICY_BOARD_ID},
-            item_name: "{agent_name}",
-            column_values: "{column_values_str}"
-        ) {{
-            id
-        }}
-    }}
-    '''
-
-    data = {'query': query}
-    logger.info(f"Sending GraphQL query to Monday.com: {query}")
-
-    response = requests.post(url, headers=headers, json=data)
-
-    if response.status_code != 200 or 'errors' in response.json():
-        logger.error(f"Failed to create item in Monday.com: {response.text}")
-        return None
-
-    logger.info(f"Successfully created item in Monday.com: {response.json()}")
-    return response.json()
-
-
-
-
-def process_log_card(extracted_data, agent_name):
+def process_log_card(extracted_data, full_name):
     """
     Processes the extracted data from a log card and sends it to Monday.com.
 
     Parameters:
         extracted_data (dict): The data extracted from the PDF by the AI model.
-        agent_name (str): The name of the agent handling the log card.
+        full_name (str): The full name of the user.
     """
     try:
         # Extract the actual JSON data from the content field
@@ -206,7 +142,7 @@ def process_log_card(extracted_data, agent_name):
         parsed_data = json.loads(content)
 
         # Proceed with your existing logic
-        create_monday_item_from_json(agent_name, parsed_data)
+        create_monday_item_from_json(full_name, parsed_data)
         logger.info(f"Successfully processed log card for vehicle: {parsed_data.get('Vehicle_No', 'Unknown Vehicle No')}")
     except json.JSONDecodeError as e:
         logger.error(f"Failed to decode JSON from extracted content: {e}")
@@ -214,8 +150,6 @@ def process_log_card(extracted_data, agent_name):
         logger.error(f"Content error: {e}")
     except Exception as e:
         logger.error(f"Error processing log card: {e}")
-
-
 
 # Function to monitor the PDF folder and process new PDFs
 def monitor_pdf_folder():
@@ -241,16 +175,14 @@ def monitor_pdf_folder():
 
                 if extracted_data:
                     logger.info(f"Successfully processed {pdf_file}")
-                    agent_name = "Unknown Agent"  # Replace with actual logic to get agent name
-                    process_log_card(extracted_data, agent_name)
+                    full_name = "Unknown Agent"  # Placeholder, actual name should come from user data
+                    process_log_card(extracted_data, full_name)
 
                 # Mark this file as processed
                 processed_files.add(pdf_path)
 
         # Wait for some time before checking the folder again
         time.sleep(10)  # Check every 10 seconds
-
-
 
 # Function to extract text from a PDF using the AI model
 def extract_text_from_pdf(pdf_path):
@@ -276,7 +208,6 @@ def extract_text_from_pdf(pdf_path):
         logger.error(f"Error during PDF text extraction for {pdf_path}: {e}")
         return None
 
-
 # Function to extract text from an image using OCR
 def extract_text_from_image(image_path):
     try:
@@ -291,17 +222,26 @@ def extract_text_from_image(image_path):
 def create_pdf_with_text(text, pdf_path):
     try:
         c = canvas.Canvas(pdf_path, pagesize=letter)
-        text_object = c.beginText(40, 750)
+        width, height = letter  # Get the width and height of the page
+        text_object = c.beginText(40, height - 40)  # Start at the top of the page
         text_object.setFont("Helvetica", 12)
-        for line in text.splitlines():
+
+        # Split the text into lines and add each line to the PDF
+        lines = text.splitlines()
+        for line in lines:
             text_object.textLine(line)
+            if text_object.getY() < 40:  # If the text goes below the bottom margin, start a new page
+                c.drawText(text_object)
+                c.showPage()
+                text_object = c.beginText(40, height - 40)
+                text_object.setFont("Helvetica", 12)
+
         c.drawText(text_object)
         c.showPage()
         c.save()
-        logger.info(f"PDF created with text at {pdf_path}")
+        logger.info(f"PDF created with selectable text at {pdf_path}")
     except Exception as e:
         logger.error(f"Error creating PDF with text: {e}")
-
 
 # Function to check if a file is a valid PDF
 def is_valid_pdf(file_path):
@@ -314,7 +254,6 @@ def is_valid_pdf(file_path):
         logger.error(f"File at {file_path} is not a valid PDF: {e}")
     return False
 
-
 # Handle image upload and convert to a real PDF with text
 async def handle_upload(update: Update, context: CallbackContext, upload_type: str) -> int:
     try:
@@ -322,7 +261,7 @@ async def handle_upload(update: Update, context: CallbackContext, upload_type: s
         photo = update.message.photo[-1]
         photo_file = await photo.get_file()
 
-        # Extract the file name without extension from the file_path
+        # Extract the file name without extension
         original_file_name = os.path.basename(photo_file.file_path)
         base_name, _ = os.path.splitext(original_file_name)
         
@@ -335,7 +274,7 @@ async def handle_upload(update: Update, context: CallbackContext, upload_type: s
         # Extract text from the image using OCR
         text = extract_text_from_image(image_path)
 
-        # Define the path where the PDF will be saved, using the same name as the image
+        # Define the path where the PDF will be saved
         pdf_path = os.path.join(PDF_FOLDER, f"{base_name}.pdf")
 
         if text and text.strip():
@@ -358,8 +297,8 @@ async def handle_upload(update: Update, context: CallbackContext, upload_type: s
 
             # If the upload type is 'log_card', process the JSON data and send it to Monday.com
             if upload_type == 'log_card':
-                agent_name = context.user_data.get('agent_name', 'Unknown Agent')  # Default agent name
-                process_log_card(extracted_data, agent_name)
+                full_name = context.user_data.get('full_name', 'Unknown Agent')  # Use the full name provided by the user
+                process_log_card(extracted_data, full_name)
 
         else:
             logger.error("AI model could not extract text from the PDF.")
@@ -384,14 +323,18 @@ async def handle_upload(update: Update, context: CallbackContext, upload_type: s
         await update.message.reply_text(f"Failed to process image. Error: {str(e)}")
         return CHOOSING
 
-
-# Define the start command handler
 async def start(update: Update, context: CallbackContext) -> int:
-    user = update.effective_user
-    agent_name = user.first_name if user.first_name else user.username
+    await update.message.reply_text("Welcome! Please enter your full name:")
+    return ASKING_NAME
+
+# Handler to process the user's name and proceed with the welcome message
+async def ask_name(update: Update, context: CallbackContext) -> int:
+    full_name = update.message.text
+    context.user_data['full_name'] = full_name
+
     company_name = "Bingo"
     welcome_message = (
-        f"Hello {agent_name}!\n"
+        f"Hello {full_name}!\n"
         f"I'm your {company_name} Assistant.\n"
         "By chatting with us, you agree to share sensitive information. How can we help you today?\n\n"
         "Please select an option to upload the required documents:"
@@ -411,8 +354,7 @@ async def start(update: Update, context: CallbackContext) -> int:
     await update.message.reply_text(welcome_message, reply_markup=reply_markup)
     return CHOOSING
 
-# Implement missing functions
-
+# Function to show the remaining upload buttons
 async def show_remaining_buttons(update: Update, context: CallbackContext) -> int:
     keyboard = []
     if not context.user_data['uploads']['driver_license']:
@@ -451,10 +393,6 @@ async def upload_button_click(update: Update, context: CallbackContext) -> int:
 
     return CHOOSING
 
-async def button_click(update: Update, context: CallbackContext) -> int:
-    # Handle other button clicks if necessary
-    pass
-
 async def license_upload(update: Update, context: CallbackContext) -> int:
     return await handle_upload(update, context, upload_type='driver_license')
 
@@ -464,57 +402,18 @@ async def identity_card_upload(update: Update, context: CallbackContext) -> int:
 async def log_card_upload(update: Update, context: CallbackContext) -> int:
     return await handle_upload(update, context, upload_type='log_card')
 
-async def collect_agent_name(update: Update, context: CallbackContext) -> int:
-    agent_name = update.message.text
-    context.user_data['agent_name'] = agent_name
-    await update.message.reply_text(f"Agent name '{agent_name}' received. Please provide the dealership name.")
-    return DEALERSHIP
-
-async def collect_dealership(update: Update, context: CallbackContext) -> int:
-    dealership = update.message.text
-    context.user_data['dealership'] = dealership
-    await update.message.reply_text(f"Dealership name '{dealership}' received. Please provide the contact info.")
-    return CONTACT_INFO
-
-async def collect_contact_info(update: Update, context: CallbackContext) -> int:
-    contact_info = update.message.text
-    context.user_data['contact_info'] = contact_info
-    await update.message.reply_text(f"Contact info '{contact_info}' received. Thank you!")
-    
-    # Assuming the next step involves creating an item in Monday.com
-    agent_name = context.user_data.get('agent_name')
-    dealership = context.user_data.get('dealership')
-
-    # This is where the indentation matters; ensure the following lines are indented
-    create_monday_item_from_json(agent_name, {
-        "Owner_ID": agent_name,  # Example mapping
-        "Contact_Number": contact_info,
-        "Vehicle_Model": context.user_data.get('vehicle_model'),
-        "Vehicle_Make": context.user_data.get('vehicle_make'),
-        "Engine_No": context.user_data.get('engine_number'),
-        "Vehicle_No": context.user_data.get('vehicle_no'),
-        "Original_Registration_Date": context.user_data.get('original_registration_date')
-    })
-    
-    await show_remaining_buttons(update, context)
-    return CHOOSING
-
-
 # Main function to run the bot
 def main():
     application = Application.builder().token(TOKEN).build()
 
-    # Define conversation handler
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
-            CHOOSING: [CallbackQueryHandler(upload_button_click, pattern='^upload_'), CallbackQueryHandler(button_click)],
+            ASKING_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_name)],
+            CHOOSING: [CallbackQueryHandler(upload_button_click, pattern='^upload_')],
             UPLOAD_DRIVER_LICENSE: [MessageHandler(filters.PHOTO, license_upload)],
             UPLOAD_IDENTITY_CARD: [MessageHandler(filters.PHOTO, identity_card_upload)],
             UPLOAD_LOG_CARD: [MessageHandler(filters.PHOTO, log_card_upload)],
-            AGENT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, collect_agent_name)],
-            DEALERSHIP: [MessageHandler(filters.TEXT & ~filters.COMMAND, collect_dealership)],
-            CONTACT_INFO: [MessageHandler(filters.TEXT & ~filters.COMMAND, collect_contact_info)]
         },
         fallbacks=[]
     )

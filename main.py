@@ -13,6 +13,8 @@ import pytesseract
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from datetime import datetime
+from pathlib import Path
+
 
 
 # Explicitly specify the path to tesseract.exe
@@ -32,7 +34,7 @@ INSURANCE_BOARD_ID = os.getenv('INSURANCE_BOARD_ID')
 AI_MODEL_ENDPOINT = "http://52.221.236.123:8502/extract-pdf" 
 
 # Path to your PDF folder
-PDF_FOLDER = r"C:\Users\Celine\projects\BingoTeleBot\pdf_folder"
+PDF_FOLDER = Path.home() / "Projects" / "BingoTelegramBot" / "pdf_folder"
 
 # Enable logging
 logging.basicConfig(
@@ -47,12 +49,13 @@ CHOOSING, UPLOAD_DRIVER_LICENSE, UPLOAD_IDENTITY_CARD, UPLOAD_LOG_CARD, AGENT_NA
 # Monday board columns ID's
 
 # Referrer info board columns ID
-AGENT_NAME_COLUMN_ID = "text"
+# AGENT_NAME_COLUMN_ID = "text"
 DEALERSHIP_COLUMN_ID = "text4"
 CONTACT_INFO_COLUMN_ID = "phone"
 
 
-OWNER_ID = "text"
+OWNER_ID = "text13"
+OWNER_ID_TYPE = "text"
 CONTACT_NUMBER = "phone"
 ORIGINAL_REGISTRATION_DATA = "date8"
 VEHICLE_MODEL = "text6"
@@ -61,7 +64,6 @@ ENGINE_NUMBER = "engine_number"
 VEHICLE_NO = "text1"
 
 
-# Function to create an item in POLICY HOLDERS INFO board
 def create_monday_item_from_json(agent_name, json_data):
     url = 'https://api.monday.com/v2'
     headers = {
@@ -82,7 +84,8 @@ def create_monday_item_from_json(agent_name, json_data):
 
     # Map the JSON fields to Monday.com column IDs
     column_values = {
-        OWNER_ID: json_data.get("Owner_ID", ""),
+        OWNER_ID: json_data.get("Owner_ID", ""),  # Assuming 'text' is the correct column ID for Owner_ID
+        OWNER_ID_TYPE: json_data.get("Owner_ID_Type", ""),  # Updated to use 'text78' for Owner_ID_Type
         CONTACT_NUMBER: {"phone": json_data.get("Contact_Number", ""), "countryShortName": "SG"},
         ORIGINAL_REGISTRATION_DATA: formatted_date,
         VEHICLE_MODEL: json_data.get("Vehicle_Model", ""),
@@ -118,6 +121,64 @@ def create_monday_item_from_json(agent_name, json_data):
 
     logger.info(f"Successfully created item in Monday.com: {response.json()}")
     return response.json()
+
+    headers = {
+        'Authorization': f'Bearer {MONDAY_API_TOKEN}',
+        'Content-Type': 'application/json'
+    }
+    
+    # Parse the date to the correct format (YYYY-MM-DD)
+    original_registration_date = json_data.get("Original_Registration_Date", "")
+    if original_registration_date:
+        try:
+            original_registration_date_obj = datetime.strptime(original_registration_date, "%d %b %Y")
+            formatted_date = original_registration_date_obj.strftime("%Y-%m-%d")
+        except ValueError:
+            formatted_date = None
+    else:
+        formatted_date = None
+
+    # Map the JSON fields to Monday.com column IDs
+    column_values = {
+        "text": json_data.get("Owner_ID", ""),  # Assuming 'text' is the correct column ID for Owner_ID
+        "text5": json_data.get("Owner_ID_Type", ""),  # Assuming 'text5' is the correct column ID for Owner_ID_Type
+        CONTACT_NUMBER: {"phone": json_data.get("Contact_Number", ""), "countryShortName": "SG"},
+        ORIGINAL_REGISTRATION_DATA: formatted_date,
+        VEHICLE_MODEL: json_data.get("Vehicle_Model", ""),
+        VEHICLE_MAKE: json_data.get("Vehicle_Make", ""),
+        ENGINE_NUMBER: json_data.get("Engine_No", ""),
+        VEHICLE_NO: json_data.get("Vehicle_No", ""),
+    }
+
+    # Convert the column_values to a string that Monday.com API can accept
+    column_values_str = json.dumps(column_values).replace('"', '\\"')
+
+    # Build the GraphQL mutation query
+    query = f'''
+    mutation {{
+        create_item (
+            board_id: {POLICY_BOARD_ID},
+            item_name: "{agent_name}",
+            column_values: "{column_values_str}"
+        ) {{
+            id
+        }}
+    }}
+    '''
+
+    data = {'query': query}
+    logger.info(f"Sending GraphQL query to Monday.com: {query}")
+
+    response = requests.post(url, headers=headers, json=data)
+
+    if response.status_code != 200 or 'errors' in response.json():
+        logger.error(f"Failed to create item in Monday.com: {response.text}")
+        return None
+
+    logger.info(f"Successfully created item in Monday.com: {response.json()}")
+    return response.json()
+
+
 
 
 def process_log_card(extracted_data, agent_name):
@@ -162,6 +223,9 @@ def monitor_pdf_folder():
     
     print("Starting to monitor the PDF folder...")  # Debug: Notify that monitoring has started
 
+    # Ensure the PDF_FOLDER exists
+    PDF_FOLDER.mkdir(parents=True, exist_ok=True)
+
     while True:
         # Get the list of all PDF files in the folder
         pdf_files = [f for f in os.listdir(PDF_FOLDER) if f.endswith('.pdf')]
@@ -185,6 +249,7 @@ def monitor_pdf_folder():
 
         # Wait for some time before checking the folder again
         time.sleep(10)  # Check every 10 seconds
+
 
 
 # Function to extract text from a PDF using the AI model

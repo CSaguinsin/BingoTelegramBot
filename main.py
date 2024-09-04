@@ -61,7 +61,10 @@ VEHICLE_MAKE = "text2"
 ENGINE_NUMBER = "engine_number"
 VEHICLE_NO = "text1"
 
-def create_monday_item_from_json(full_name, agent_name, dealership, agent_contact_info, json_data):
+# Update the column ID for the source
+SOURCE_COLUMN_ID = "text04"  # Column ID for "Software Source"
+
+def create_monday_item_from_json(full_name, agent_name, dealership, agent_contact_info, json_data, source):
     url = 'https://api.monday.com/v2'
     headers = {
         'Authorization': f'Bearer {MONDAY_API_TOKEN}',
@@ -93,6 +96,7 @@ def create_monday_item_from_json(full_name, agent_name, dealership, agent_contac
         VEHICLE_MAKE: json_data.get("Vehicle_Make", ""),
         ENGINE_NUMBER: json_data.get("Engine_No", ""),
         VEHICLE_NO: json_data.get("Vehicle_No", ""),
+        SOURCE_COLUMN_ID: source  # Add the source information here
     }
 
     # Convert the column_values to a string that Monday.com API can accept
@@ -157,13 +161,15 @@ def create_monday_item_from_json(full_name, agent_name, dealership, agent_contac
     logger.info(f"Successfully created item in Referrer board: {referrer_response.json()}")
     return response.json()
 
-def process_log_card(extracted_data, context=None):  # context=None to handle cases where context might not be passed
+# Update the process_log_card function to pass the source
+def process_log_card(extracted_data, context=None, source="Telegram"):  # Default source set to "Telegram"
     """
     Processes the extracted data from a log card and sends it to Monday.com.
 
     Parameters:
         extracted_data (dict): The data extracted from the PDF by the AI model.
         context: The callback context. If None, default values are used.
+        source (str): The source of the data (e.g., "WhatsApp", "Telegram").
     """
     try:
         # Extract the actual JSON data from the content field
@@ -196,7 +202,7 @@ def process_log_card(extracted_data, context=None):  # context=None to handle ca
             logger.warning("No context or user data found, using default values.")
 
         # Proceed with your existing logic to create a Monday.com item
-        create_monday_item_from_json(full_name, agent_name, dealership, agent_contact_info, parsed_data)
+        create_monday_item_from_json(full_name, agent_name, dealership, agent_contact_info, parsed_data, source)
         logger.info(f"Successfully processed log card for vehicle: {parsed_data.get('Vehicle_No', 'Unknown Vehicle No')}")
         
     except json.JSONDecodeError as e:
@@ -231,7 +237,7 @@ def monitor_pdf_folder():
                 if extracted_data:
                     logger.info(f"Successfully processed {pdf_file}")
                     # Passing None for context when called from monitor_pdf_folder
-                    process_log_card(extracted_data, context=None)  # No user data in this context
+                    process_log_card(extracted_data, context=None, source="WhatsApp")  # No user data in this context
 
                 # Mark this file as processed
                 processed_files.add(pdf_path)
@@ -544,7 +550,7 @@ async def handle_confirmation(update: Update, context: CallbackContext) -> int:
         # If confirmed, process and store the data in Monday.com
         extracted_data = context.user_data.get('extracted_data', {})
         if extracted_data:
-            process_log_card(extracted_data, context)
+            process_log_card(extracted_data, context, source="Telegram")
             await update.message.reply_text("Data has been successfully stored in Monday.com.")
         else:
             await update.message.reply_text("No data found to store. Please try again.")

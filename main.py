@@ -60,11 +60,12 @@ VEHICLE_MODEL = "text6"
 VEHICLE_MAKE = "text2"
 ENGINE_NUMBER = "engine_number"
 VEHICLE_NO = "text1"
+CHASSIS_NO = "text775"
 
 # Update the column ID for the source
 SOURCE_COLUMN_ID = "text04"  # Column ID for "Software Source"
 
-def create_monday_item_from_json(full_name, agent_name, dealership, agent_contact_info, json_data, source):
+def create_monday_item_from_json(full_name, agent_name, dealership, agent_contact_info, json_data, source, pdf_path=None):  # Added pdf_path parameter
     url = 'https://api.monday.com/v2'
     headers = {
         'Authorization': f'Bearer {MONDAY_API_TOKEN}',
@@ -95,8 +96,10 @@ def create_monday_item_from_json(full_name, agent_name, dealership, agent_contac
         VEHICLE_MODEL: json_data.get("Vehicle_Model", ""),
         VEHICLE_MAKE: json_data.get("Vehicle_Make", ""),
         ENGINE_NUMBER: json_data.get("Engine_No", ""),
+        CHASSIS_NO: json_data.get("Chassis_No", ""),
         VEHICLE_NO: json_data.get("Vehicle_No", ""),
-        SOURCE_COLUMN_ID: source  # Add the source information here
+        SOURCE_COLUMN_ID: source,  # Add the source information here
+        "files": pdf_path  # Add the PDF file path to the column
     }
 
     # Convert the column_values to a string that Monday.com API can accept
@@ -107,8 +110,8 @@ def create_monday_item_from_json(full_name, agent_name, dealership, agent_contac
     mutation {{
         create_item (
             board_id: {POLICY_BOARD_ID},
-            item_name: "{full_name}",  # Use Full Name as the item name
-            column_values: "{column_values_str}"
+            item_name: "{full_name}",  # Use double quotes for item name
+            column_values: "{column_values_str}"  # No change needed here
         ) {{
             id
         }}
@@ -141,7 +144,7 @@ def create_monday_item_from_json(full_name, agent_name, dealership, agent_contac
     mutation {{
         create_item (
             board_id: {REFERRER_BOARD_ID},
-            item_name: "{dealership}",  # Use Dealership as the item name
+            item_name: "{dealership}",  # Use Dealership as the item name with double quotes
             column_values: "{referrer_column_values_str}"
         ) {{
             id
@@ -159,10 +162,21 @@ def create_monday_item_from_json(full_name, agent_name, dealership, agent_contac
         return None
 
     logger.info(f"Successfully created item in Referrer board: {referrer_response.json()}")
+    
+    # After creating the item, upload the PDF file to the "Files" column
+    if pdf_path:
+        with open(pdf_path, 'rb') as pdf_file:
+            files = {'file': (os.path.basename(pdf_path), pdf_file, 'application/pdf')}
+            upload_response = requests.post(f"{url}/files", headers=headers, files=files)
+            if upload_response.status_code == 200:
+                logger.info(f"Successfully uploaded PDF file: {pdf_path}")
+            else:
+                logger.error(f"Failed to upload PDF file: {upload_response.text}")
+
     return response.json()
 
-# Update the process_log_card function to pass the source
-def process_log_card(extracted_data, context=None, source="Telegram"):  # Default source set to "Telegram"
+# Update the process_log_card function to pass the source and pdf_path
+def process_log_card(extracted_data, context=None, source="Telegram", pdf_path=None):  # Default source set to "Telegram"
     """
     Processes the extracted data from a log card and sends it to Monday.com.
 
@@ -170,6 +184,7 @@ def process_log_card(extracted_data, context=None, source="Telegram"):  # Defaul
         extracted_data (dict): The data extracted from the PDF by the AI model.
         context: The callback context. If None, default values are used.
         source (str): The source of the data (e.g., "WhatsApp", "Telegram").
+        pdf_path (str): The path to the generated PDF file.
     """
     try:
         # Extract the actual JSON data from the content field
@@ -202,7 +217,7 @@ def process_log_card(extracted_data, context=None, source="Telegram"):  # Defaul
             logger.warning("No context or user data found, using default values.")
 
         # Proceed with your existing logic to create a Monday.com item
-        create_monday_item_from_json(full_name, agent_name, dealership, agent_contact_info, parsed_data, source)
+        create_monday_item_from_json(full_name, agent_name, dealership, agent_contact_info, parsed_data, source, pdf_path)  # Pass pdf_path
         logger.info(f"Successfully processed log card for vehicle: {parsed_data.get('Vehicle_No', 'Unknown Vehicle No')}")
         
     except json.JSONDecodeError as e:
@@ -237,7 +252,7 @@ def monitor_pdf_folder():
                 if extracted_data:
                     logger.info(f"Successfully processed {pdf_file}")
                     # Passing None for context when called from monitor_pdf_folder
-                    process_log_card(extracted_data, context=None, source="WhatsApp")  # No user data in this context
+                    process_log_card(extracted_data, context=None, source="WhatsApp", pdf_path=pdf_path)  # Pass pdf_path
 
                 # Mark this file as processed
                 processed_files.add(pdf_path)
@@ -549,9 +564,10 @@ async def handle_confirmation(update: Update, context: CallbackContext) -> int:
     if update.message.text.strip().lower() == "yes":
         # If confirmed, process and store the data in Monday.com
         extracted_data = context.user_data.get('extracted_data', {})
+        agent_name = context.user_data.get('agent_name', 'Unknown Agent')  # Get the agent name
         if extracted_data:
             process_log_card(extracted_data, context, source="Telegram")
-            await update.message.reply_text("Data has been successfully stored in Monday.com.")
+            await update.message.reply_text(f"Data has been successfully stored in Monday.com for Agent: {agent_name}.")  # Include agent name
         else:
             await update.message.reply_text("No data found to store. Please try again.")
     else:
@@ -628,4 +644,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

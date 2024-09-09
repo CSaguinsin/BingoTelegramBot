@@ -14,6 +14,11 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from datetime import datetime
 from pathlib import Path
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+import subprocess
+import glob
 
 # Explicitly specify the path to tesseract.exe
 pytesseract.pytesseract.tesseract_cmd = '/opt/homebrew/bin/tesseract'
@@ -33,6 +38,7 @@ AI_MODEL_ENDPOINT = "http://52.221.236.123:8502/extract-pdf"
 
 # Path to your PDF folder
 PDF_FOLDER = Path.home() / "Projects" / "BingoTelegramBot" / "pdf_folder"
+IMAGE_FOLDER = Path("/Users/carlsaginsin/Projects/BingoTelegramBot/image_folder")  # Added image folder path
 
 # Enable logging
 logging.basicConfig(
@@ -331,8 +337,28 @@ def is_valid_pdf(file_path):
         logger.error(f"File at {file_path} is not a valid PDF: {e}")
     return False
 
-# Handle image upload and convert to a real PDF with text
-# Function to handle image upload and convert to a real PDF with text
+# Load environment variables from .env file
+# load_dotenv()
+
+# def upload_to_google_drive(file_path, file_name):
+#     SCOPES = ['https://www.googleapis.com/auth/drive.file']
+#     SERVICE_ACCOUNT_FILE = os.getenv('SERVICE_ACCOUNT')  # service account creds from env
+
+#     credentials = service_account.Credentials.from_service_account_file(
+#         SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+
+#     service = build('drive', 'v3', credentials=credentials)
+
+#     file_metadata = {
+#         'name': file_name,
+#         'parents': ['1AtdPC6yx-u0SlvV-erAwT2jEJ1HlnxcI']  # Your Google Drive folder ID
+#     }
+#     media = MediaFileUpload(file_path, mimetype='image/jpeg')  # Adjust MIME type if necessary
+
+#     file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+#     logger.info(f"Uploaded file to Google Drive with ID: {file.get('id')}")
+
+# Update the handle_upload function to save images to the local image folder instead of Google Drive
 async def handle_upload(update: Update, context: CallbackContext, upload_type: str) -> int:
     try:
         # Get the highest resolution image from the user's upload
@@ -344,10 +370,10 @@ async def handle_upload(update: Update, context: CallbackContext, upload_type: s
         base_name, _ = os.path.splitext(original_file_name)
         
         # Define the path where the image will be saved
-        image_path = os.path.join(PDF_FOLDER, f"{base_name}.jpg")
+        image_path = IMAGE_FOLDER / f"{base_name}.jpg"  # Save to local image folder
 
-        # Download the image file to the local file system
-        await photo_file.download_to_drive(image_path)
+        # Download the image file to the local file system (only to IMAGE_FOLDER)
+        await photo_file.download_to_drive(image_path)  # Save the image to the image folder
 
         # Extract text from the image using OCR
         text = extract_text_from_image(image_path)
@@ -360,9 +386,6 @@ async def handle_upload(update: Update, context: CallbackContext, upload_type: s
             create_pdf_with_text(text, pdf_path)
         else:
             raise ValueError("OCR failed to extract any text from the image.")
-
-        # Clean up the local image file after saving the PDF
-        os.remove(image_path)
 
         # Validate if the PDF file is correct
         if not is_valid_pdf(pdf_path):
@@ -568,6 +591,14 @@ async def handle_confirmation(update: Update, context: CallbackContext) -> int:
         if extracted_data:
             process_log_card(extracted_data, context, source="Telegram")
             await update.message.reply_text(f"Data has been successfully stored in Monday.com for Agent: {agent_name}.")  # Include agent name
+            
+            # Gather image paths from the image folder
+            image_folder = '/Users/carlsaginsin/Projects/BingoTelegramBot/image_folder/*.jpg'
+            image_paths = glob.glob(image_folder)  # Get all image paths
+
+            # Call DocumentUpload.py with the image paths
+            subprocess.run(['python3', 'DocumentUpload.py'] + image_paths)
+
         else:
             await update.message.reply_text("No data found to store. Please try again.")
     else:

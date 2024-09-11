@@ -91,6 +91,10 @@ def create_monday_item_from_json(full_name, agent_name, dealership, agent_contac
     else:
         formatted_date = None
 
+    # Extract Issue Date and License Number from the extracted data
+    issue_date = json_data.get("Issue_Date", "")  # Assuming the key in JSON is "Issue_Date"
+    license_number = json_data.get("License_Number", "")  # Assuming the key in JSON is "License_Number"
+
     # Map the JSON fields to Monday.com column IDs for POLICY_BOARD_ID
     column_values = {
         FULL_NAME: full_name,
@@ -108,7 +112,9 @@ def create_monday_item_from_json(full_name, agent_name, dealership, agent_contac
         VEHICLE_NO: json_data.get("Vehicle_No", ""),
         SOURCE_COLUMN_ID: source,  # Add the source information here
         "files": pdf_path,  # Add the PDF file path to the column
-        "text49": folder_link  # Store the Google Drive folder link in the Documents Folder column
+        "text49": folder_link,  # Store the Google Drive folder link in the Documents Folder column
+        "text92": issue_date,  # Store the Issue Date
+        "text8": license_number  # Store the License Number
     }
 
     # Convert the column_values to a string that Monday.com API can accept
@@ -191,7 +197,50 @@ def create_monday_item_from_json(full_name, agent_name, dealership, agent_contac
         else:
             logger.error(f"Failed to upload PDF file to Documents Uploaded column: {upload_response.text}")
 
+    # After creating the item, update it with Issue Date and License Number
+    item_id = response.json().get("id")
+    update_monday_item(item_id, issue_date, license_number)  # Call the update function
+
     return response.json()
+
+def update_monday_item(item_id, issue_date, license_number):
+    """Update the Monday.com item with Issue Date and License Number."""
+    url = 'https://api.monday.com/v2'
+    headers = {
+        'Authorization': f'Bearer {MONDAY_API_TOKEN}',
+        'Content-Type': 'application/json'
+    }
+
+    # Prepare the column values to update
+    column_values = {
+        "text92": issue_date,  # Store the Issue Date
+        "text8": license_number  # Store the License Number
+    }
+
+    # Convert the column_values to a string that Monday.com API can accept
+    column_values_str = json.dumps(column_values).replace('"', '\\"')
+
+    # Build the GraphQL mutation query to update the item
+    query = f'''
+    mutation {{
+        change_column_values (
+            board_id: {POLICY_BOARD_ID},
+            item_id: {item_id},
+            column_values: "{column_values_str}"
+        ) {{
+            id
+        }}
+    }}
+    '''
+
+    data = {'query': query}
+    response = requests.post(url, headers=headers, json=data)
+
+    if response.status_code != 200 or 'errors' in response.json():
+        logger.error(f"Failed to update item in Monday.com: {response.text}")
+        return None
+
+    logger.info(f"Successfully updated item in Monday.com: {response.json()}")
 
 # Update the process_log_card function to accept folder_link
 def process_log_card(extracted_data, context=None, source="Telegram", pdf_path=None, folder_link=None):  # Added folder_link parameter

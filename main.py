@@ -19,6 +19,8 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 import subprocess
 import glob
+import base64
+import httpx  # Added for verified HTTPS requests
 
 # Explicitly specify the path to tesseract.exe
 pytesseract.pytesseract.tesseract_cmd = '/opt/homebrew/bin/tesseract'
@@ -71,7 +73,7 @@ CHASSIS_NO = "text775"
 # Update the column ID for the source
 SOURCE_COLUMN_ID = "text04"  # Column ID for "Software Source"
 
-def create_monday_item_from_json(full_name, agent_name, dealership, agent_contact_info, json_data, source, pdf_path=None):  # Added pdf_path parameter
+def create_monday_item_from_json(full_name, agent_name, dealership, agent_contact_info, json_data, source, pdf_path=None, folder_link=None):  # Added folder_link parameter
     url = 'https://api.monday.com/v2'
     headers = {
         'Authorization': f'Bearer {MONDAY_API_TOKEN}',
@@ -105,7 +107,8 @@ def create_monday_item_from_json(full_name, agent_name, dealership, agent_contac
         CHASSIS_NO: json_data.get("Chassis_No", ""),
         VEHICLE_NO: json_data.get("Vehicle_No", ""),
         SOURCE_COLUMN_ID: source,  # Add the source information here
-        "files": pdf_path  # Add the PDF file path to the column
+        "files": pdf_path,  # Add the PDF file path to the column
+        "text49": folder_link  # Store the Google Drive folder link in the Documents Folder column
     }
 
     # Convert the column_values to a string that Monday.com API can accept
@@ -169,20 +172,29 @@ def create_monday_item_from_json(full_name, agent_name, dealership, agent_contac
 
     logger.info(f"Successfully created item in Referrer board: {referrer_response.json()}")
     
-    # After creating the item, upload the PDF file to the "Files" column
+    # After creating the item, upload the PDF file to the "Documents Uploaded" column
     if pdf_path:
-        with open(pdf_path, 'rb') as pdf_file:
-            files = {'file': (os.path.basename(pdf_path), pdf_file, 'application/pdf')}
-            upload_response = requests.post(f"{url}/files", headers=headers, files=files)
-            if upload_response.status_code == 200:
-                logger.info(f"Successfully uploaded PDF file: {pdf_path}")
-            else:
-                logger.error(f"Failed to upload PDF file: {upload_response.text}")
+        api_url = "https://api.monday.com/v2/file"
+        headers = {
+            "Authorization": MONDAY_API_TOKEN
+        }
+        files = {
+            'variables[file]': (pdf_path, open(pdf_path, 'rb'))
+        }
+        data = {
+            'query': f'mutation ($file: File!) {{ add_file_to_column (item_id: {response.json()["id"]}, column_id: "files", file: $file) {{ id }} }}'
+        }
+        
+        upload_response = requests.post(api_url, headers=headers, files=files, data=data)
+        if upload_response.status_code == 200:
+            logger.info(f"Successfully uploaded PDF file to Documents Uploaded column: {pdf_path}")
+        else:
+            logger.error(f"Failed to upload PDF file to Documents Uploaded column: {upload_response.text}")
 
     return response.json()
 
-# Update the process_log_card function to pass the source and pdf_path
-def process_log_card(extracted_data, context=None, source="Telegram", pdf_path=None):  # Default source set to "Telegram"
+# Update the process_log_card function to accept folder_link
+def process_log_card(extracted_data, context=None, source="Telegram", pdf_path=None, folder_link=None):  # Added folder_link parameter
     """
     Processes the extracted data from a log card and sends it to Monday.com.
 
@@ -191,6 +203,7 @@ def process_log_card(extracted_data, context=None, source="Telegram", pdf_path=N
         context: The callback context. If None, default values are used.
         source (str): The source of the data (e.g., "WhatsApp", "Telegram").
         pdf_path (str): The path to the generated PDF file.
+        folder_link (str): The Google Drive folder link.
     """
     try:
         # Extract the actual JSON data from the content field
@@ -223,7 +236,7 @@ def process_log_card(extracted_data, context=None, source="Telegram", pdf_path=N
             logger.warning("No context or user data found, using default values.")
 
         # Proceed with your existing logic to create a Monday.com item
-        create_monday_item_from_json(full_name, agent_name, dealership, agent_contact_info, parsed_data, source, pdf_path)  # Pass pdf_path
+        create_monday_item_from_json(full_name, agent_name, dealership, agent_contact_info, parsed_data, source, pdf_path, folder_link)  # Pass folder_link
         logger.info(f"Successfully processed log card for vehicle: {parsed_data.get('Vehicle_No', 'Unknown Vehicle No')}")
         
     except json.JSONDecodeError as e:
@@ -358,34 +371,86 @@ def is_valid_pdf(file_path):
 #     file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
 #     logger.info(f"Uploaded file to Google Drive with ID: {file.get('id')}")
 
-# Update the handle_upload function to save images to the local image folder instead of Google Drive
+# Function to create a folder in Google Drive and return its link
+def create_drive_folder(service, folder_name):
+    # Check if the folder already exists
+    query = f"mimeType='application/vnd.google-apps.folder' and name='{folder_name}' and trashed=false"
+    response = service.files().list(q=query, fields='files(id)').execute()
+    folders = response.get('files', [])
+
+    if folders:
+        folder_id = folders[0]['id']
+    else:
+        # If the folder does not exist, create it
+        file_metadata = {
+            'name': folder_name,
+            'mimeType': 'application/vnd.google-apps.folder',
+            'parents': ['1Dk5NwHFTdWcX13PD64Z7Ljaa8NbqP_Ye']  # Parent folder ID
+        }
+        folder = service.files().create(body=file_metadata, fields='id').execute()
+        folder_id = folder.get('id')
+
+    # Return the folder link
+    return f"https://drive.google.com/drive/folders/{folder_id}"
+
+# Function to upload a file to Google Drive
+def upload_file_to_drive(service, file_path, folder_id):
+    file_metadata = {
+        'name': os.path.basename(file_path),
+        'parents': [folder_id]
+    }
+    media = MediaFileUpload(file_path, mimetype='image/jpeg')  # Adjust MIME type if necessary
+    file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+    logger.info(f"Uploaded file to Google Drive with ID: {file.get('id')}")
+
+# Function to extract text from an image using ImgOCR API
+def extract_text_from_image_ocr(image_path):
+    try:
+        with open(image_path, 'rb') as image_file:
+            file_data = base64.b64encode(image_file.read()).decode('utf-8')
+        
+        post_data = {
+            'api_key': os.getenv('IMG_OCR_API_KEY'),  # Use the API key from the .env file
+            'image': file_data
+        }
+        
+        # Example of making a verified HTTPS request with httpx
+        response = httpx.post('https://www.imgocr.com/api/imgocr_get_text', data=post_data, verify=True, timeout=10.0)  # Set timeout to 10 seconds
+
+        if response.status_code == 200:
+            return response.json().get('text', '')
+        else:
+            logger.error(f"Failed to extract text from image using ImgOCR: {response.text}")
+            return None
+    except Exception as e:
+        logger.error(f"Error during ImgOCR text extraction for {image_path}: {e}")
+        return None
+
+# Update the handle_upload function to extract text using ImgOCR
 async def handle_upload(update: Update, context: CallbackContext, upload_type: str) -> int:
     try:
         # Get the highest resolution image from the user's upload
         photo = update.message.photo[-1]
         photo_file = await photo.get_file()
 
-        # Extract the file name without extension
-        original_file_name = os.path.basename(photo_file.file_path)
-        base_name, _ = os.path.splitext(original_file_name)
-        
-        # Define the path where the image will be saved
-        image_path = IMAGE_FOLDER / f"{base_name}.jpg"  # Save to local image folder
+        # Define the name for the image based on the upload type
+        image_name = f"{upload_type.replace('_', ' ').title()}.jpg"
+        image_path = IMAGE_FOLDER / image_name
 
-        # Download the image file to the local file system (only to IMAGE_FOLDER)
-        await photo_file.download_to_drive(image_path)  # Save the image to the image folder
+        # Download the image file to the local file system
+        await photo_file.download_to_drive(image_path)
 
-        # Extract text from the image using OCR
-        text = extract_text_from_image(image_path)
+        # Extract text from the image using ImgOCR
+        extracted_text = extract_text_from_image_ocr(image_path)
 
         # Define the path where the PDF will be saved
-        pdf_path = os.path.join(PDF_FOLDER, f"{base_name}.pdf")
+        pdf_path = os.path.join(PDF_FOLDER, f"{upload_type.replace('_', ' ').title()}.pdf")
 
-        if text and text.strip():
+        if extracted_text and extracted_text.strip():
             # Create a real PDF with the extracted text
-            create_pdf_with_text(text, pdf_path)
+            create_pdf_with_text(extracted_text, pdf_path)
         else:
-            raise ValueError("OCR failed to extract any text from the image.")
+            raise ValueError("ImgOCR failed to extract any text from the image.")
 
         # Validate if the PDF file is correct
         if not is_valid_pdf(pdf_path):
@@ -406,21 +471,34 @@ async def handle_upload(update: Update, context: CallbackContext, upload_type: s
         # Mark the upload as done
         context.user_data['uploads'][upload_type] = True
 
+        # Google Drive API setup
+        SCOPES = ['https://www.googleapis.com/auth/drive.file']
+        SERVICE_ACCOUNT_FILE = os.getenv('SERVICE_ACCOUNT')
+        credentials = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+        service = build('drive', 'v3', credentials=credentials)
+
+        # Create a folder for the user based on their full name only if it doesn't exist
+        user_full_name = context.user_data.get('full_name', 'Unknown_User')
+        folder_link = create_drive_folder(service, user_full_name)
+
+        # Upload the image to the created folder
+        upload_file_to_drive(service, image_path, folder_link.split('/')[-1])
+
+        # Store the folder link in user data for later use
+        context.user_data['folder_link'] = folder_link
+
         # Send a thank you message to the user
         await update.message.reply_text(f"Thank you for uploading your {upload_type.replace('_', ' ')}.")
 
         # Check if all uploads are done
         if all(context.user_data['uploads'].values()):
-            # All documents have been uploaded, ask for additional information
             await show_additional_buttons(update, context)
             logger.info("All uploads completed. Transitioning to additional information input.")
-            return CHOOSING  # Correct state to handle button clicks for Agent Name, Dealership, and Contact Info
+            return CHOOSING
 
-        # Otherwise, show remaining upload buttons
         return await show_upload_buttons(update, context)
 
     except Exception as e:
-        # Handle errors
         logger.error(f"Error processing image: {e}")
         await update.message.reply_text(f"Failed to process image. Error: {str(e)}")
         return CHOOSING
@@ -588,8 +666,9 @@ async def handle_confirmation(update: Update, context: CallbackContext) -> int:
         # If confirmed, process and store the data in Monday.com
         extracted_data = context.user_data.get('extracted_data', {})
         agent_name = context.user_data.get('agent_name', 'Unknown Agent')  # Get the agent name
+        folder_link = context.user_data.get('folder_link', None)  # Get the folder link
         if extracted_data:
-            process_log_card(extracted_data, context, source="Telegram")
+            process_log_card(extracted_data, context, source="Telegram", folder_link=folder_link)  # Pass folder_link
             await update.message.reply_text(f"Data has been successfully stored in Monday.com for Agent: {agent_name}.")  # Include agent name
             
             # Gather image paths from the image folder
@@ -597,7 +676,7 @@ async def handle_confirmation(update: Update, context: CallbackContext) -> int:
             image_paths = glob.glob(image_folder)  # Get all image paths
 
             # Call DocumentUpload.py with the image paths
-            subprocess.run(['python3', 'DocumentUpload.py'] + image_paths)
+            # subprocess.run(['python3', 'DocumentUpload.py'] + image_paths)
 
         else:
             await update.message.reply_text("No data found to store. Please try again.")

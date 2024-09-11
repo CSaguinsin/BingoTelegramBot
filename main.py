@@ -723,6 +723,19 @@ async def license_upload(update: Update, context: CallbackContext) -> int:
         logger.info(f"Extracted text from Driver's License: {extracted_text}")
         print("Driver's License Extracted Text:", extracted_text)  # Show extracted text in terminal
     
+    # Google Drive API setup
+    SCOPES = ['https://www.googleapis.com/auth/drive.file']
+    SERVICE_ACCOUNT_FILE = os.getenv('SERVICE_ACCOUNT')
+    credentials = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+    service = build('drive', 'v3', credentials=credentials)
+
+    # Create a folder for the user based on their full name only if it doesn't exist
+    user_full_name = context.user_data.get('full_name', 'Unknown_User')
+    folder_link = create_drive_folder(service, user_full_name)
+
+    # Upload the image to the created folder
+    upload_file_to_drive(service, image_path, folder_link.split('/')[-1])
+
     # Notify user that the upload was successful
     await update.message.reply_text("Driver's License uploaded successfully and text extracted.")
     context.user_data['uploads']['driver_license'] = True  # Mark as uploaded
@@ -743,6 +756,19 @@ async def identity_card_upload(update: Update, context: CallbackContext) -> int:
         logger.info(f"Extracted text from Identity Card: {extracted_text}")
         print("Identity Card Extracted Text:", extracted_text)  # Show extracted text in terminal
     
+    # Google Drive API setup
+    SCOPES = ['https://www.googleapis.com/auth/drive.file']
+    SERVICE_ACCOUNT_FILE = os.getenv('SERVICE_ACCOUNT')
+    credentials = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+    service = build('drive', 'v3', credentials=credentials)
+
+    # Create a folder for the user based on their full name only if it doesn't exist
+    user_full_name = context.user_data.get('full_name', 'Unknown_User')
+    folder_link = create_drive_folder(service, user_full_name)
+
+    # Upload the image to the created folder
+    upload_file_to_drive(service, image_path, folder_link.split('/')[-1])
+
     # Notify user that the upload was successful
     await update.message.reply_text("Identity Card uploaded successfully and text extracted.")
     context.user_data['uploads']['identity_card'] = True  # Mark as uploaded

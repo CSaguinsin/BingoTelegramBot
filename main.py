@@ -710,15 +710,47 @@ async def upload_button_click(update: Update, context: CallbackContext) -> int:
 
 # Handle the upload of the driver's license
 async def license_upload(update: Update, context: CallbackContext) -> int:
-    return await handle_upload(update, context, upload_type='driver_license')
+    # Skip PDF creation for driver's license
+    photo = update.message.photo[-1]
+    photo_file = await photo.get_file()
+    image_name = "Driver_License.jpg"
+    image_path = IMAGE_FOLDER / image_name
+    await photo_file.download_to_drive(image_path)
+    
+    # Extract text using ImgOCR
+    extracted_text = extract_text_from_image_ocr(image_path)
+    if extracted_text:
+        logger.info(f"Extracted text from Driver's License: {extracted_text}")
+        print("Driver's License Extracted Text:", extracted_text)  # Show extracted text in terminal
+    
+    # Notify user that the upload was successful
+    await update.message.reply_text("Driver's License uploaded successfully and text extracted.")
+    context.user_data['uploads']['driver_license'] = True  # Mark as uploaded
+    return await show_remaining_buttons(update, context)
 
 # Handle the upload of the identity card
 async def identity_card_upload(update: Update, context: CallbackContext) -> int:
-    return await handle_upload(update, context, upload_type='identity_card')
+    # Skip PDF creation for identity card
+    photo = update.message.photo[-1]
+    photo_file = await photo.get_file()
+    image_name = "Identity_Card.jpg"
+    image_path = IMAGE_FOLDER / image_name
+    await photo_file.download_to_drive(image_path)
+    
+    # Extract text using ImgOCR
+    extracted_text = extract_text_from_image_ocr(image_path)
+    if extracted_text:
+        logger.info(f"Extracted text from Identity Card: {extracted_text}")
+        print("Identity Card Extracted Text:", extracted_text)  # Show extracted text in terminal
+    
+    # Notify user that the upload was successful
+    await update.message.reply_text("Identity Card uploaded successfully and text extracted.")
+    context.user_data['uploads']['identity_card'] = True  # Mark as uploaded
+    return await show_remaining_buttons(update, context)
 
 # Handle the upload of the log card
 async def log_card_upload(update: Update, context: CallbackContext) -> int:
-    return await handle_upload(update, context, upload_type='log_card')
+    return await handle_upload(update, context, upload_type='log_card')  # Only log card will be processed
 
 
 # Main function to run the bot

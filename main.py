@@ -91,25 +91,28 @@ def create_monday_item_from_json(full_name, agent_name, dealership, agent_contac
     else:
         formatted_date = None
 
-    # Map the JSON fields to Monday.com column IDs for POLICY_BOARD_ID
+    # Correctly format the phone number
     column_values = {
         FULL_NAME: full_name,
         AGENT_NAME: agent_name,
-        AGENT_CONTACT_NUMBER: {"phone": agent_contact_info, "countryShortName": "SG"},
+        AGENT_CONTACT_NUMBER: {"phone": agent_contact_info, "countryShortName": "SG"},  # Ensure this is correct
         DEALERSHIP_COLUMN_ID: dealership,
         OWNER_ID: json_data.get("Owner_ID", ""),
         OWNER_ID_TYPE: json_data.get("Owner_ID_Type", ""),
-        CONTACT_NUMBER: {"phone": json_data.get("Contact_Number", ""), "countryShortName": "SG"},
+        CONTACT_NUMBER: {"phone": json_data.get("Contact_Number", ""), "countryShortName": "SG"},  # Ensure this is correct
         ORIGINAL_REGISTRATION_DATA: formatted_date,
         VEHICLE_MODEL: json_data.get("Vehicle_Model", ""),
         VEHICLE_MAKE: json_data.get("Vehicle_Make", ""),
         ENGINE_NUMBER: json_data.get("Engine_No", ""),
         CHASSIS_NO: json_data.get("Chassis_No", ""),
         VEHICLE_NO: json_data.get("Vehicle_No", ""),
-        SOURCE_COLUMN_ID: source,  # Add the source information here
-        "files": pdf_path,  # Add the PDF file path to the column
-        "text49": folder_link  # Store the Google Drive folder link in the Documents Folder column
+        SOURCE_COLUMN_ID: source,
+        "files": pdf_path,
+        "text49": folder_link
     }
+
+    # Add logging to check the values being used
+    logger.info(f"Creating item with full_name: {full_name}, agent_name: {agent_name}, dealership: {dealership}")
 
     # Convert the column_values to a string that Monday.com API can accept
     column_values_str = json.dumps(column_values).replace('"', '\\"')
@@ -131,6 +134,9 @@ def create_monday_item_from_json(full_name, agent_name, dealership, agent_contac
     logger.info(f"Sending GraphQL query to Monday.com: {query}")
 
     response = requests.post(url, headers=headers, json=data)
+
+    # Log the response for debugging
+    logger.info(f"Response from Monday.com: {response.status_code} - {response.text}")
 
     if response.status_code != 200 or 'errors' in response.json():
         logger.error(f"Failed to create item in Monday.com: {response.text}")
@@ -227,6 +233,8 @@ def process_log_card(extracted_data, context=None, source="Telegram", pdf_path=N
             agent_name = context.user_data.get('agent_name', 'Unknown Agent')
             dealership = context.user_data.get('dealership', 'Unknown Dealership')
             agent_contact_info = context.user_data.get('agent_contact_info', 'Unknown Contact Info')
+            # Log the full_name to verify it's being set correctly
+            logger.info(f"Retrieved full_name from context: {full_name}")
         else:
             # If no context is provided, use default values
             full_name = 'Unknown Agent'
@@ -397,7 +405,7 @@ def create_drive_folder(service, folder_name):
 def upload_file_to_drive(service, file_path, folder_id):
     file_metadata = {
         'name': os.path.basename(file_path),
-        'parents': [folder_id]
+        'parents': [folder_id]  # Ensure this is the correct folder ID
     }
     media = MediaFileUpload(file_path, mimetype='image/jpeg')  # Adjust MIME type if necessary
     file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
@@ -479,10 +487,10 @@ async def handle_upload(update: Update, context: CallbackContext, upload_type: s
 
         # Create a folder for the user based on their full name only if it doesn't exist
         user_full_name = context.user_data.get('full_name', 'Unknown_User')
-        folder_link = create_drive_folder(service, user_full_name)
+        folder_link = create_drive_folder(service, user_full_name)  # Create folder and get link
 
         # Upload the image to the created folder
-        upload_file_to_drive(service, image_path, folder_link.split('/')[-1])
+        upload_file_to_drive(service, image_path, folder_link.split('/')[-1])  # Ensure this uses the correct folder ID
 
         # Store the folder link in user data for later use
         context.user_data['folder_link'] = folder_link
@@ -502,6 +510,15 @@ async def handle_upload(update: Update, context: CallbackContext, upload_type: s
         logger.error(f"Error processing image: {e}")
         await update.message.reply_text(f"Failed to process image. Error: {str(e)}")
         return CHOOSING
+
+def upload_file_to_drive(service, file_path, folder_id):
+    file_metadata = {
+        'name': os.path.basename(file_path),
+        'parents': [folder_id]  # Ensure this is the correct folder ID
+    }
+    media = MediaFileUpload(file_path, mimetype='image/jpeg')  # Adjust MIME type if necessary
+    file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+    logger.info(f"Uploaded file to Google Drive with ID: {file.get('id')}")
 
 # Function to show additional buttons for further information
 async def show_additional_buttons(update: Update, context: CallbackContext) -> int:
